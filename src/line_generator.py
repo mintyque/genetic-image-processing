@@ -8,11 +8,12 @@ from PIL import Image
 from PIL import ImageDraw
 
 BLACK = (0, 0, 0, 255)
-LINES = 30
-QUALITY = 95
-INPUT_NAME = "Me.png"
-OUTPUT_DIRECTORY = "/home/mintyque/evolution"
-OUTPUT_NAME = "result"
+WHITE = (255, 255, 255, 255)
+LINES = 50
+QUALITY = 80
+INPUT_NAME = "example1.jpg"
+OUTPUT_DIRECTORY = "/empty/for/now"
+OUTPUT_NAME = "result_column"
 MUTATION = 4
 
 
@@ -31,11 +32,11 @@ class Line(object):
             self.color = tuple(color)
         else:
             idx = random.randrange(0, 2)
-            point = generate_point(size)
+            point = generate_row_point(size)
             self.points[idx] = point
 
 
-class DNA(object):
+class RowDNA(object):
     def __init__(self, img_width, cur_line, lines=[]):
         self.img_width = img_width
         self.cur_line = cur_line
@@ -48,9 +49,9 @@ class DNA(object):
             rand_ind = random.randrange(0, len(lines))
             random_line = lines[rand_ind]
             random_line.mutate(self.img_width)
-        return DNA(self.img_width, self.cur_line, lines)
+        return RowDNA(self.img_width, self.cur_line, lines)
 
-    def draw(self, background=BLACK):
+    def draw(self, background=WHITE):
         size = (self.img_width, 1)
         img = Image.new('RGB', size, background)
         draw = Image.new('RGBA', size)
@@ -63,14 +64,42 @@ class DNA(object):
         return img
 
 
-class Result(object):
+class ColumnDNA(object):
+    def __init__(self, img_height, cur_line, lines=[]):
+        self.img_height = img_height
+        self.cur_line = cur_line
+        self.lines = lines
+
+    def mutate(self):
+        lines = copy.deepcopy(self.lines)
+        rand = random.randrange(0, len(lines) // MUTATION)
+        for i in range(rand):
+            rand_ind = random.randrange(0, len(lines))
+            random_line = lines[rand_ind]
+            random_line.mutate(self.img_height)
+        return ColumnDNA(self.img_height, self.cur_line, lines)
+
+    def draw(self, background=WHITE):
+        size = (1, self.img_height)
+        img = Image.new('RGB', size, background)
+        draw = Image.new('RGBA', size)
+        pdraw = ImageDraw.Draw(draw)
+        for line in self.lines:
+            color = line.color
+            points = line.points
+            pdraw.line(points, fill=color, width=1)
+            img.paste(draw, mask=draw)
+        return img
+
+
+class RowResult(object):
     def __init__(self, img_size, rows=[]):
         self.img_size = img_size
         self.rows = rows
 
     def display(self):
         size = self.img_size
-        img = Image.new('RGB', size, BLACK)
+        img = Image.new('RGB', size, WHITE)
         draw = Image.new('RGBA', size)
         pdraw = ImageDraw.Draw(draw)
         offset = -1
@@ -86,7 +115,7 @@ class Result(object):
                 points = (tuple(point_a), tuple(point_b))
                 pdraw.line(points, fill=color, width=1)
                 img.paste(draw, mask=draw)
-        out_path = "{}/{}.png".format(OUTPUT_DIRECTORY, OUTPUT_NAME)
+        out_path = "{}.jpg".format(OUTPUT_NAME)
         img.save(out_path)
         print("saving image to {}".format(out_path))
 
@@ -94,9 +123,40 @@ class Result(object):
         self.rows.append(row)
 
 
-def fitness(pixels, dna_img):
+class ColumnResult(object):
+    def __init__(self, img_size, columns=[]):
+        self.img_size = img_size
+        self.columns = columns
+
+    def display(self):
+        size = self.img_size
+        img = Image.new('RGB', size, WHITE)
+        draw = Image.new('RGBA', size)
+        pdraw = ImageDraw.Draw(draw)
+        offset = -1
+        for column in self.columns:
+            offset += 1
+            for line in column.lines:
+                color = line.color
+                points = line.points
+                point_a = list(points[0])
+                point_b = list(points[1])
+                point_a[1] += offset
+                point_b[1] += offset
+                points = (tuple(point_a), tuple(point_b))
+                pdraw.line(points, fill=color, width=1)
+                img.paste(draw, mask=draw)
+        out_path = "{}.jpg".format(OUTPUT_NAME)
+        img.save(out_path)
+        print("saving image to {}".format(out_path))
+
+    def add_column(self, column):
+        self.columns.append(column)
+
+
+def row_fitness(pixels, dna_img):
     diff = 0.0
-    dna_pixels = get_line(dna_img)
+    dna_pixels = get_row_line(dna_img)
     for i in range(0, len(pixels)):
         pixel = pixels[i]
         r1 = pixel[0]
@@ -116,9 +176,37 @@ def fitness(pixels, dna_img):
     return fit
 
 
-def generate_point(width):
+def column_fitness(pixels, dna_img):
+    diff = 0.0
+    dna_pixels = get_column_line(dna_img)
+    for i in range(0, len(pixels)):
+        pixel = pixels[i]
+        r1 = pixel[0]
+        g1 = pixel[1]
+        b1 = pixel[2]
+        dna_pixel = dna_pixels[i]
+        r2 = dna_pixel[0]
+        g2 = dna_pixel[1]
+        b2 = dna_pixel[2]
+        d_r = r1 - r2
+        d_g = g1 - g2
+        d_b = b1 - b2
+        pixel_diff = math.sqrt(d_r * d_r + d_g * d_g + d_b * d_b)
+        diff += pixel_diff
+    max_diff = len(pixels) * 440
+    fit = (1 - diff/max_diff) * 100
+    return fit
+
+
+def generate_row_point(width):
     x = random.randrange(0, width, 1)
     y = 0
+    return x, y
+
+
+def generate_column_point(height):
+    x = 0
+    y = random.randrange(0, height, 1)
     return x, y
 
 
@@ -130,21 +218,39 @@ def generate_color():
     return red, green, blue, alpha
 
 
-def generate_dna(img_width, cur_line):
+def generate_row_dna(img_width, cur_line):
     lines = []
     width = img_width
 
     for i in range(LINES):
         points = []
-        point_1 = generate_point(width)
-        point_2 = generate_point(width)
+        point_1 = generate_row_point(width)
+        point_2 = generate_row_point(width)
         points.append(point_1)
         points.append(point_2)
         color = generate_color()
         line = Line(color, points)
         lines.append(line)
 
-    dna = DNA(width, cur_line, lines)
+    dna = RowDNA(width, cur_line, lines)
+    return dna
+
+
+def generate_column_dna(img_height, cur_line):
+    lines = []
+    height = img_height
+
+    for i in range(LINES):
+        points = []
+        point_1 = generate_column_point(height)
+        point_2 = generate_column_point(height)
+        points.append(point_1)
+        points.append(point_2)
+        color = generate_color()
+        line = Line(color, points)
+        lines.append(line)
+
+    dna = ColumnDNA(height, cur_line, lines)
     return dna
 
 
@@ -154,7 +260,7 @@ def load_image(path):
     return img
 
 
-def get_line(img, idx=0):
+def get_row_line(img, idx=0):
     width = img.size[0]
     pixels = np.zeros(width, dtype=tuple)
     for i in range(0, width):
@@ -162,31 +268,66 @@ def get_line(img, idx=0):
     return pixels
 
 
+def get_column_line(img, idx=0):
+    height = img.size[1]
+    pixels = np.zeros(height, dtype=tuple)
+    for i in range(0, height):
+        pixels[i] = img.getpixel((idx, i))
+    return pixels
+
+
 def main():
     img = load_image(INPUT_NAME)
     print("Image loaded")
     img_size = img.size
-    img_width = img_size[0]
-    result = Result(img_size)
+    img_height = img_size[1]
+    result = ColumnResult(img_size)
     print("Starting to generate")
-    for i in range(img_width):
-        dna = generate_dna(img_width, i)
-        in_row = get_line(img, dna.cur_line)
+    for i in range(img_height):
+        dna = generate_column_dna(img_height, i)
+        in_column = get_column_line(img, dna.cur_line)
         parent = dna.draw()
-        fitness_parent = fitness(in_row, parent)
+        fitness_parent = column_fitness(in_column, parent)
         count = 1
-        while fitness_parent < QUALITY:
+        while fitness_parent < QUALITY and count <= 5000:
             dna_mutated = dna.mutate()
             child = dna_mutated.draw()
-            fitness_child = fitness(in_row, child)
+            fitness_child = column_fitness(in_column, child)
             if fitness_child > fitness_parent:
                 dna = dna_mutated
                 fitness_parent = fitness_child
             count += 1
-        print("row {} took {} operations".format(i, count))
-        result.add_row(dna)
+        print("column {} took {} operations".format(i, count))
+        result.add_column(dna)
     result.display()
     return sys.exit(0)
+
+
+#def main():
+#    img = load_image(INPUT_NAME)
+#    print("Image loaded")
+#    img_size = img.size
+#    img_width = img_size[0]
+#    result = RowResult(img_size)
+#    print("Starting to generate")
+#    for i in range(img_width):
+#        dna = generate_row_dna(img_width, i)
+#        in_row = get_row_line(img, dna.cur_line)
+#        parent = dna.draw()
+#        fitness_parent = row_fitness(in_row, parent)
+#        count = 1
+#        while fitness_parent < QUALITY and count <= 50000:
+#            dna_mutated = dna.mutate()
+#            child = dna_mutated.draw()
+#            fitness_child = row_fitness(in_row, child)
+#            if fitness_child > fitness_parent:
+#                dna = dna_mutated
+#                fitness_parent = fitness_child
+#            count += 1
+#        print("row {} took {} operations".format(i, count))
+#        result.add_row(dna)
+#    result.display()
+#    return sys.exit(0)
 
 
 if __name__ == "__main__":
